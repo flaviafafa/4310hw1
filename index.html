@@ -1,0 +1,277 @@
+<html>
+<head>
+  <title>Tree Diversity in SF</title>
+  
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://d3js.org/topojson.v3.min.js"></script>
+  
+  <style>
+      .neighborhood {
+        fill: #d4d4d8;
+      }
+      .outline {
+        stroke: #3f3f46;
+        stroke-width: 1px;
+        fill: none;
+      }
+      #choropleth{
+        background-color: white;
+      }
+      .label-line {
+        stroke: black;
+        stroke-width: 1.5px;
+      }
+      .label-box {
+        fill: white;
+        stroke: black;
+        stroke-width: 1px;
+      }
+      .bar {
+        border: 5px solid #555;
+      }
+      .label, .axis text {
+        font-size: 12px;
+        font-family: Verdana, Geneva, Tahoma, sans-serif;
+        fill: black;
+      }
+      body{
+        font-family: Verdana, Geneva, Tahoma, sans-serif;
+        margin-top: 30px;
+        margin-bottom: 30px
+      }
+      .title {
+        font-weight: bold;
+      }
+      .larger{
+        font-size: 14px;
+      }
+      #legend{
+        margin-top: 10px;
+      }
+      p, h1{
+        margin-left: 20px
+      }
+      p{
+        max-width: 900px;
+      }
+      h1{
+        font-size: 22px;
+        font-family: Verdana, Geneva, Tahoma, sans-serif;
+      }
+
+  </style>
+  
+</head>
+<body>
+    <h1>Tree Species Diversity in San Francisco Neighborhoods</h1>
+    <p>
+        Tree species diversity is measured as the percentage of tree species present in each neighborhood 
+        relative to the total number of species found across San Francisco.
+    </p>    
+    <svg id="legend" height="50" width="700"></svg>
+    <svg id="choropleth" height="560" width="770"></svg>
+
+    <h1>Top 10 Most Common Tree Species in San Francisco</h1>
+    <p>
+        A tree species' popularity is determined by the percentage of neighborhoods in San Francisco where 
+        it is found, based on neighborhoods with complete data.
+    </p>
+
+    <svg id="barchart" height="310" width="1210"></svg>
+
+    <script>
+    const mapsvg = d3.select("#choropleth");
+    const mapWidth = mapsvg.attr("width");
+    const mapHeight = mapsvg.attr("height");
+    const mapMargin = { top: 20, right: 20, bottom: 20, left:20 };
+    const mapAreaWidth = mapWidth - mapMargin.left - mapMargin.right;
+    const mapAreaHeight = mapHeight - mapMargin.top - mapMargin.bottom;
+    const map = mapsvg.append("g")
+                    .attr("transform",`translate(${mapMargin.left},${mapMargin.top})`);
+    
+    const requestMap = async function() {
+        const sf = await d3.json("SF-Neighborhoods.geo.json");
+
+        var neighborhoods = topojson.feature(sf, sf.objects.SFNeighborhoods);
+        var neighborhoodsMesh = topojson.mesh(sf, sf.objects.SFNeighborhoods);
+        var projection = d3.geoAlbersUsa().fitSize([mapAreaWidth, mapAreaHeight], neighborhoods);
+        var path = d3.geoPath().projection(projection);
+
+        map.selectAll("path.neighborhood").data(neighborhoods.features)
+            .join("path")
+            .attr("class", "neighborhood")
+            .attr("note", d => d.properties.name)
+            .attr("d", path);
+
+        map.append("path").datum(neighborhoodsMesh)
+            .attr("class","outline")
+            .attr("d", path);
+
+        var mapData = await d3.csv("species_diversity_per_neighborhood.csv", d3.autotype);
+        var speciesMap = {};
+        mapData.forEach(d => {
+            speciesMap[d.name] = Number(d.qSpecies);
+        });
+
+        var maxSpecies = Math.ceil(d3.max(Object.values(speciesMap)));
+        var minSpecies = Math.floor(d3.min(Object.values(speciesMap)));
+        var colorScale = d3.scaleSequential(d3.interpolateRgb("white", "#14532d"))
+                           .domain([minSpecies, maxSpecies]);
+
+        map.selectAll(".neighborhood")
+            .style("fill", d => speciesMap[d.properties.name] ? colorScale(speciesMap[d.properties.name]) : "#d4d4d8");
+
+        // Add color legend
+        let legend = d3.select("#legend");
+        let gradient = legend.append("defs").append("linearGradient")
+            .attr("id", "legend-gradient")
+            .attr("x1", "0%").attr("x2", "100%")
+            .attr("y1", "0%").attr("y2", "0%");
+        gradient.append("stop").attr("offset", "0%").attr("stop-color", "white");
+        gradient.append("stop").attr("offset", "100%").attr("stop-color", "#14532d");
+
+        legend.append("rect")
+            .attr("width", 400)
+            .attr("height", 15)
+            .attr("x", 100)
+            .attr("y", 20)
+            .attr("stroke", "black")
+            .attr("rx", 8)
+            .attr("ry", 8)
+            .attr("fill", "url(#legend-gradient)");
+
+        legend.append("text").attr("x", 100).attr("y", 50).text(`${minSpecies}%`).attr("class", "label larger");
+        legend.append("text").attr("x", 480).attr("y", 50).text(`${maxSpecies}%`).attr("class", "label larger");
+        legend.append("text")
+            .attr("x", 300)
+            .attr("y", 10)
+            .text("Species Diversity")
+            .attr("class", "label title larger")
+            .attr("text-anchor", "middle");
+
+        // Legend for incomplete data
+        legend.append("rect")
+            .attr("x", 550)
+            .attr("y", 20)
+            .attr("stroke", "black")
+            .attr("width", 120)
+            .attr("rx", 8)
+            .attr("ry", 8)
+            .attr("height", 15)
+            .attr("fill", "#d4d4d8");
+        legend.append("text").attr("x", 610).attr("y", 10).text("Incomplete Data").attr("class", "label title larger").attr("text-anchor", "middle");
+
+        // 
+        // Add labels
+        const labels = [
+            { name: "Potrero Hill", lat: 37.7597, lon: -122.4011, value: "41.63%", title: "Highest Species Diversity:", width: 160 },
+            { name: "Downtown / Union Square", lat: 37.7876, lon: -122.4066, value: "2.15%", title: "Lowest Species Diversity:", width: 205 }
+        ];
+
+        labels.forEach(d => {
+            const [x, y] = projection([d.lon, d.lat]);
+            const labelX = x + 100;
+            const labelY = y - 25;
+
+            map.append("line")
+                .attr("class", "label-line")
+                .attr("x1", x)
+                .attr("y1", y)
+                .attr("x2", labelX - 10) 
+                .attr("y2", labelY + 10)
+                .attr("stroke", "black");
+
+            map.append("rect")
+                .attr("class", "label-box")
+                .attr("x", labelX - 30)
+                .attr("y", labelY - 14)
+                .attr("rx", 5)
+                .attr("ry", 5)
+                .attr("width", d.width)
+                .attr("height", 40);
+
+            map.append("text")
+                .attr("class", "label")
+                .attr("x", labelX - 25)
+                .attr("y", labelY + 3)
+                .attr("class", "label")
+                .text(d.title);
+
+            map.append("text")
+                .attr("class", "label")
+                .attr("x", labelX - 25)
+                .attr("y", labelY + 19)
+                .attr("class", "label title")
+                .text(`${d.name} (${d.value})`);
+        });
+    };
+    requestMap();
+    </script>
+
+    <script>
+    const svg = d3.select("svg#barchart");
+    const width = svg.attr("width");
+    const height = svg.attr("height");
+    const margin = { top: 10, right: 10, bottom: 100, left: 60 };
+    const chartWidth = width - margin.left - margin.right;
+    const chartHeight = height - margin.top - margin.bottom;
+
+    let annotations = svg.append("g").attr("id", "annotations");
+    let chartArea = svg.append("g").attr("id", "points")
+                      .attr("transform", `translate(${margin.left},${margin.top})`);
+
+    const requestBar = async function() {
+        var barData = await d3.csv("neighborhood_coverage_per_species.csv", d => ({
+            qSpecies: String(d.qSpecies),
+            name: +d.name
+        }));
+
+        const percentScale = d3.scaleLinear().domain([70, 100]).range([chartHeight, 0]);
+        const xScale = d3.scaleBand()
+                         .domain(barData.map(d => d.qSpecies))
+                         .range([0, chartWidth])
+                         .padding(0.2);
+
+        let leftAxis = d3.axisLeft(percentScale).tickValues([70, 80, 90, 100]).tickFormat(d => d + "%");
+        annotations.append("g").attr("class", "y axis")
+                   .attr("transform", `translate(${margin.left - 10},${margin.top})`)
+                   .call(leftAxis);
+
+        let bottomAxis = d3.axisBottom(xScale);
+        annotations.append("g").attr("class", "x axis")
+                   .attr("transform", `translate(${margin.left},${chartHeight + margin.top + 10})`)
+                   .call(bottomAxis)
+                   .selectAll("text")
+                   .attr("transform", "rotate(-30)")
+                   .style("text-anchor", "end");
+
+        chartArea.selectAll("g.bar-group")
+            .data(barData, d => d.qSpecies)
+            .join(enter => {
+                let group = enter.append("g").attr("class", "bar-group").attr("transform", "translate(0,-2)");
+
+                group.append("rect")
+                    .attr("x", d => xScale(d.qSpecies) - 1)
+                    .attr("y", d => percentScale(d.name) - 1)
+                    .attr("width", xScale.bandwidth() + 2)
+                    .attr("height", d => percentScale(70) - percentScale(d.name) + 2)
+                    .attr("fill", "none")
+                    .attr("stroke", "black")
+                    .attr("stroke-width", 2);
+
+                group.append("image")
+                    .attr("x", d => xScale(d.qSpecies))
+                    .attr("y", d => percentScale(d.name))
+                    .attr("width", xScale.bandwidth())
+                    .attr("height", d => percentScale(70) - percentScale(d.name))
+                    .attr("xlink:href", d => `images/${d.qSpecies}.jpg`)
+                    .attr("preserveAspectRatio", "none");
+
+                return group;
+            });
+    };
+    requestBar();
+    </script>
+
+</body>
+</html>
